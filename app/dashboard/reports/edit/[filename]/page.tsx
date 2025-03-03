@@ -68,6 +68,9 @@ interface EditReportPageProps {
   };
 }
 
+// Template-Pfad für Excel-Export
+const TEMPLATE_URL = "/reports/Template.xlsx";
+
 export default function EditReportPage({ params }: EditReportPageProps) {
   const { filename } = params;
   const [startDate, setStartDate] = useState<Date | undefined>(
@@ -302,85 +305,106 @@ export default function EditReportPage({ params }: EditReportPageProps) {
     setDayEntries(newEntries);
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     if (!isDataLoaded) return;
 
     setIsLoading(true);
 
     try {
-      // Daten für Excel vorbereiten
-      const workData: Record<string, any>[] = [];
-      const schoolData: Record<string, any>[] = [];
+      // Kalenderwoche berechnen
+      let weekNumber = "";
+      if (startDate) {
+        // ISO-Wochennummer berechnen
+        const date = new Date(startDate);
+        date.setHours(0, 0, 0, 0);
+        date.setDate(date.getDate() + 3 - ((date.getDay() + 6) % 7));
+        const week1 = new Date(date.getFullYear(), 0, 4);
+        weekNumber = String(
+          1 +
+            Math.round(
+              ((date.getTime() - week1.getTime()) / 86400000 -
+                3 +
+                ((week1.getDay() + 6) % 7)) /
+                7
+            )
+        );
+      }
 
-      dayEntries.forEach((day) => {
-        // Arbeitsaktivitäten
+      // Tageseinträge für die API vorbereiten
+      const days = dayEntries.map((day) => {
+        // Aktivitäten sammeln, mit Kennzeichnung für die Art
+        let description = "";
+        let totalHours = 0;
+
+        // Arbeitstätigkeiten
         day.workActivities.forEach((activity) => {
           if (activity.description.trim() && activity.hours > 0) {
-            workData.push({
-              Datum: format(day.date, "yyyy-MM-dd"),
-              Wochentag: format(day.date, "EEEE", { locale: de }),
-              Tätigkeit: activity.description,
-              Stunden: activity.hours,
-              Art: activity.activityType || "Arbeit",
-            });
+            description += `${activity.description}\n`;
+            totalHours += activity.hours;
           }
         });
 
-        // Schulaktivitäten
+        // Schulische Tätigkeiten mit Tag kennzeichnen
         if (day.isSchoolDay) {
           day.schoolActivities.forEach((activity) => {
             if (activity.description.trim() && activity.hours > 0) {
-              schoolData.push({
-                Datum: format(day.date, "yyyy-MM-dd"),
-                Wochentag: format(day.date, "EEEE", { locale: de }),
-                Tätigkeit: activity.description,
-                Stunden: activity.hours,
-                Art: activity.activityType || "Schule",
-              });
+              description += `[Schule] ${activity.description}\n`;
+              totalHours += activity.hours;
             }
           });
         }
+
+        return {
+          date: format(day.date, "dd.MM.yyyy"),
+          description: description.trim(),
+          hours: totalHours.toString(),
+        };
       });
 
-      // Zusammenfassung
-      const summary = {
+      // Zusätzliche Metadaten für den Report
+      const metadata = {
         Titel: title,
         Berichtstyp: "weekly",
-        Abteilung: "it",
-        StartDatum: startDate ? format(startDate, "yyyy-MM-dd") : "",
-        EndDatum: startDate ? format(addDays(startDate, 4), "yyyy-MM-dd") : "",
+        Berichtsnummer: filename.replace(".json", ""),
+        Ausbildungsjahr: "Anwendungsentwickler",
+        Abteilung: "IT",
+        StartDatum: startDate ? format(startDate, "dd.MM.yyyy") : "",
+        EndDatum: startDate ? format(addDays(startDate, 4), "dd.MM.yyyy") : "",
         Anmerkungen: notes,
       };
 
-      // Arbeitsmappe erstellen
-      const workbook = XLSX.utils.book_new();
+      // Daten für die API
+      const requestData = {
+        filename: `${title || "Ausbildungsnachweis"}.xlsx`,
+        weekNumber,
+        name: "Auszubildender",
+        days,
+        metadata,
+      };
 
-      // Zusammenfassung hinzufügen
-      const summarySheet = XLSX.utils.json_to_sheet([summary]);
-      XLSX.utils.book_append_sheet(workbook, summarySheet, "Zusammenfassung");
+      // API aufrufen zum Herunterladen des generierten Reports
+      const response = await fetch("/api/download-report", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestData),
+      });
 
-      // Arbeitsblatt hinzufügen
-      if (workData.length > 0) {
-        const workSheet = XLSX.utils.json_to_sheet(workData);
-        XLSX.utils.book_append_sheet(
-          workbook,
-          workSheet,
-          "Betriebliche Tätigkeiten"
-        );
+      if (!response.ok) {
+        throw new Error("Fehler beim Generieren des Berichts");
       }
 
-      // Schulblatt hinzufügen
-      if (schoolData.length > 0) {
-        const schoolSheet = XLSX.utils.json_to_sheet(schoolData);
-        XLSX.utils.book_append_sheet(
-          workbook,
-          schoolSheet,
-          "Schulische Tätigkeiten"
-        );
-      }
-
-      // Als Excel-Datei exportieren
-      XLSX.writeFile(workbook, `${title || "Berichtsheft"}.xlsx`);
+      // Blob erzeugen und herunterladen
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = requestData.filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
 
       toast({
         title: "Excel exportiert",

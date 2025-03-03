@@ -36,6 +36,7 @@ import {
 import { format } from "date-fns";
 import { de } from "date-fns/locale";
 import * as XLSX from "xlsx";
+import { cn } from "@/lib/utils";
 
 interface Report {
   filename: string;
@@ -146,32 +147,26 @@ export default function DashboardPage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch(`/api/reports/${filename}`);
-      if (!response.ok) {
-        throw new Error("Fehler beim Laden des Berichts");
-      }
+      // Direkter Download-Link zur Datei im public-Verzeichnis
+      const downloadUrl = `/reports/${filename}`;
 
-      const data = await response.json();
-
-      // Arbeitsblatt erstellen
-      const worksheet = XLSX.utils.json_to_sheet(data.data);
-
-      // Arbeitsmappe erstellen und Arbeitsblatt hinzufügen
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "Bericht");
-
-      // Als Excel-Datei exportieren
-      XLSX.writeFile(workbook, filename);
+      // Link-Element erstellen und klicken
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
 
       toast({
-        title: "Excel exportiert",
-        description: "Die Daten wurden erfolgreich als Excel-Datei exportiert.",
+        title: "Download gestartet",
+        description: "Die Excel-Datei wird heruntergeladen.",
       });
     } catch (error) {
-      console.error("Fehler beim Exportieren der Excel-Datei:", error);
+      console.error("Fehler beim Herunterladen der Excel-Datei:", error);
       toast({
         title: "Fehler",
-        description: "Die Excel-Datei konnte nicht exportiert werden.",
+        description: "Die Excel-Datei konnte nicht heruntergeladen werden.",
       });
     } finally {
       setIsLoading(false);
@@ -182,15 +177,31 @@ export default function DashboardPage() {
     <DashboardShell>
       <DashboardHeader />
       <PageHeader
-        heading="Berichtshefte"
-        text="Verwalten Sie Ihre Berichtshefte hier."
+        heading="Dashboard"
+        text="Verwalten Sie hier Ihre Berichtshefte."
       >
-        <Link href="/dashboard/reports/new">
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            Neues Berichtsheft
+        <div className="flex items-center gap-2">
+          <Link href="/dashboard/reports/new">
+            <Button disabled={isLoading}>
+              <Plus className="mr-2 h-4 w-4" />
+              Neues Berichtsheft
+            </Button>
+          </Link>
+          <Button variant="outline" onClick={fetchReports} disabled={isLoading}>
+            <RefreshCw
+              className={cn("mr-2 h-4 w-4", {
+                "animate-spin": isLoading,
+              })}
+            />
+            Aktualisieren
           </Button>
-        </Link>
+          <Link href="/dashboard/template-test">
+            <Button variant="outline" size="sm">
+              <FileText className="mr-2 h-4 w-4" />
+              Template testen
+            </Button>
+          </Link>
+        </div>
       </PageHeader>
 
       <div className="grid gap-4">
